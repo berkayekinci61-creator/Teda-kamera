@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TEDAŞ Topraklamalar - Canlı Kamera & Sesli Asistan</title>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --card: rgba(20, 27, 45, 0.88);
+            --primary: #3b82f6;
+            --accent: #10b981;
+            --danger: #ef4444;
+            --warn: #f59e0b;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Tam Ekran Kamera Alanı */
+        .camera-viewport {
+            position: relative;
+            flex: 1;
+            width: 100%;
+            background: #000;
+            overflow: hidden;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Odak Çerçevesi */
+        .scan-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle, transparent 45%, rgba(0,0,0,0.55) 100%);
+        }
+        .scan-box {
+            width: 86%;
+            max-width: 440px;
+            height: 36%;
+            border: 2px solid rgba(59, 130, 246, 0.75);
+            border-radius: 18px;
+            position: relative;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .scan-box.scanning {
+            border-color: var(--warn);
+            box-shadow: 0 0 25px rgba(245, 158, 11, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.35);
+        }
+        .scan-box.found {
+            border-color: var(--accent);
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.6), 0 0 0 9999px rgba(0, 0, 0, 0.35);
+        }
+        .scan-line {
+            position: absolute;
+            left: 4%;
+            right: 4%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+            top: 10%;
+            animation: scanAnim 2.2s infinite ease-in-out;
+            display: none;
+        }
+        .scan-box.active .scan-line { display: block; }
+        @keyframes scanAnim {
+            0%, 100% { top: 8%; opacity: 0.4; }
+            50% { top: 90%; opacity: 1; }
+        }
+        .scan-hint {
+            margin-top: 14px;
+            background: rgba(15, 23, 42, 0.8);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #e2e8f0;
+            backdrop-filter: blur(6px);
+        }
+
+        /* Üst Kontrol Barı */
+        .top-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            z-index: 10;
+        }
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255,255,255,0.12);
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            backdrop-filter: blur(8px);
+        }
+        .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--muted);
+        }
+        .dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1.5s infinite; }
+        .dot.busy { background: var(--warn); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+        .icon-btn {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+        }
+
+        /* Alt Cevap ve Kontrol Paneli */
+        .bottom-sheet {
+            background: var(--card);
+            backdrop-filter: blur(14px);
+            border-top: 1px solid rgba(255,255,255,0.12);
+            padding: 14px 16px 20px;
+            border-radius: 22px 22px 0 0;
+            margin-top: -18px;
+            z-index: 10;
+            max-height: 44dvh;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .controls-row {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-main {
+            flex: 1;
+            padding: 13px;
+            border: none;
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            color: #fff;
+            background: var(--primary);
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        .btn-main:active { transform: scale(0.98); }
+        .btn-main.stop { background: var(--danger); }
+        .btn-sec {
+            padding: 13px 14px;
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 14px;
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .answer-box {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px;
+            padding: 12px 14px;
+            overflow-y: auto;
+            font-size: 14.5px;
+            line-height: 1.5;
+            min-height: 82px;
+        }
+        .answer-badge {
+            display: inline-block;
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            padding: 2px 9px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        /* Ayarlar Modalı */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.82);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            z-index: 50;
+        }
+        .modal.open { display: flex; }
+        .modal-card {
+            background: #1e293b;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 18px;
+            padding: 20px;
+            width: 100%;
+            max-width: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .modal-card h3 { font-size: 17px; }
+        .modal-card label { font-size: 13px; color: var(--muted); }
+        .modal-card input, .modal-card select {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: #0f172a;
+            color: #fff;
+            font-size: 14px;
+        }
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="camera-viewport">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+
+        <div class="top-bar">
+            <div class="status-pill">
+                <span class="dot" id="statusDot"></span>
+                <span id="statusText">Kamera Bekleniyor</span>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <button class="icon-btn" id="voiceToggleBtn">🔊 Ses Açık</button>
+                <button class="icon-btn" id="settingsBtn">⚙️ API</button>
+            </div>
+        </div>
+
+        <div class="scan-overlay">
+            <div class="scan-box" id="scanBox">
+                <div class="scan-line"></div>
+            </div>
+            <div class="scan-hint" id="scanHint">Soruyu çerçeveye ortalayın</div>
+        </div>
+    </div>
+
+    <div class="bottom-sheet">
+        <div class="controls-row">
+            <button class="btn-main" id="toggleScanBtn">▶️ Canlı Taramayı Başlat</button>
+            <button class="btn-sec" id="instantScanBtn" title="Beklemeden şimdi oku">⚡ Şimdi Oku</button>
+            <button class="btn-sec" id="replayVoiceBtn" title="Son cevabı tekrar seslendir">🔁</button>
+        </div>
+
+        <div class="answer-box" id="answerBox">
+            <div style="color: var(--muted);">
+                <b>Nasıl Çalışır?</b><br>
+                1. Sağ üstten <b>⚙️ API</b> butonuna basıp Gemini API anahtarınızı kaydedin.<br>
+                2. <b>Canlı Taramayı Başlat</b>'a basın. Kamera sürekli açık kalır, ekranda yeni bir soru gördüğü anda otomatik çözer ve cevabı sesli okur.
+            </div>
+        </div>
+    </div>
+
+    <!-- Ayarlar Modalı -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-card">
+            <h3>⚙️ Canlı Tarama & API Ayarları</h3>
+            <div>
+                <label>Google Gemini API Anahtarı</label>
+                <input type="password" id="apiKeyInput" placeholder="AIzaSy...">
+            </div>
+            <div>
+                <label>Otomatik Tarama Aralığı (Saniye)</label>
+                <select id="intervalSelect">
+                    <option value="3500">3.5 Saniye (Hızlı)</option>
+                    <option value="5000" selected>5 Saniye (Dengeli - Önerilen)</option>
+                    <option value="8000">8 Saniye (Kota Dostu)</option>
+                </select>
+            </div>
+            <div>
+                <label>Konuşma Hızı</label>
+                <select id="rateSelect">
+                    <option value="0.95">Normal (0.95x)</option>
+                    <option value="1.1" selected>Akıcı (1.1x)</option>
+                    <option value="1.25">Hızlı (1.25x)</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:4px;">
+                <button class="btn-main" id="saveSettingsBtn">Kaydet</button>
+                <button class="btn-sec" id="closeSettingsBtn">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+const KNOWLEDGE_BASE = `
+KAYNAK KİTAP BİLGİ TABANI (TEDAŞ TOPRAKLAMALAR BÖLÜMÜ - SAYFA 256-272):
+- S.256: Topraklama, elektrik tesislerinde aktif olmayan bölümler ile sıfır iletkenlerinin bir elektrot yardımıyla toprakla iletken olarak birleştirilmesidir. Dolaysız ve dolaylı topraklama vardır.
+- S.257: Topraklayıcı çeşitleri: Şerit, boru/profil, levha ve temel topraklayıcılar. Asgari boyutlar: Bakır levha en az 1,5 mm, galvanizli çelik levha en az 3 mm kalınlığında olmalıdır. Topraklama iletkenleri minimum kesitleri: Bakır 16 mm², Alüminyum 35 mm², Çelik 50 mm². Yüzeysel topraklayıcı 0,5-1 m derine yatay gömülür; derin topraklayıcı dikey çakılır.
+- S.258-260: Şebeke Tipleri: 1. Harf (Kaynak): T=Doğrudan topraklı, I=Topraktan izole veya empedanslı. 2. Harf (Tüketici gövdesi): T=Doğrudan topraklı, N=Nötr üzerinden koruma. Sonraki harfler: S=Nötr (N) ve Koruma (PE) ayrı, C=Nötr ve Koruma tek iletkende birleşik (PEN). TT, TN-C, TN-S, TN-C-S ve IT şebeke tipleri mevcuttur. Mahalli topraklama sadece bulunduğu cihazı/direği koruyan yerel topraklamadır.
+- S.261-269: Saha Uygulama Kuralları: Topraklama şeridi/iletkeni yüzeyden en az 50 cm (0,5-1 m) derine gömülür. Standart galvanizli profil kazık 2 m boyundadır (NPL 65x65x7 mm). İki elektrot arası mesafe (a), elektrot boyunun en az 2 katı (4 m) olmalıdır. Aynı direkte veya sahada işletme topraklaması ile koruma topraklaması arasında en az 20 metre mesafe bulunmalıdır. Direk üstünden inen işletme topraklaması kablosu (1 kV 50 mm² NYY), temel üstünden itibaren 2 m (bazı şemalarda 2,15 m) galvanizli gaz borusu veya PVC boru ile mekanik korumaya alınır. Trafo binalarında ızgara (ağ) topraklama en az 50 cm derine gömülür ve kontrol amacıyla kazık başlarına 40x40 cm rögar yapılır.
+- S.270: Topraklama Direnci Ölçümü (Meger): Ölçümden önce topraklama iletkeni sistemden ayrılır. Ölçüm esnasında terminaller arasında yaklaşık 50 V AC gerilim oluşacağından kazıklara dokunulmaz. Bağlantılar: E (Yeşil kablo) = Ölçülecek ana topraklama elektroduna; P (Sarı kablo) = Ana elektrottan 5-10 m ileriye çakılan 1. yardımcı çubuğa; C (Kırmızı kablo) = 1. yardımcı çubuktan 5-10 m daha ileriye çakılan 2. yardımcı çubuğa bağlanır. Kuru zemin nemlendirilir, kablolar birbirine değmez, önce Earth Voltage (Toprak Voltajı) kontrol edilir.
+- S.271-272: Saha planında elektrot yeri, cinsi, boyutu, derinliği, direnç değerleri ve ölçümü yapan elektrik mühendisinin bilgileri (adı soyadı, unvanı, oda kayıt no) yer alır. Global topraklama sistemi içindeki alanlarda toprak direncini ayrıca doğrulamaya gerek yoktur. Periyodik kontrol süreleri: Sabit olmayan tesislerin yer değiştirebilen elemanları 6 ay; parlayıcı/patlayıcı/tehlikeli işyerleri, ıslak ortamlar, sabit olmayan tesislerin sabit elemanları ve sanayi/ticaret merkezlerinin topraklama dirençleri 1 yıl; elektrik üretim, iletim ve dağıtım tesisleri (hatlar hariç) ve sanayi/ticaret merkezlerinin diğer muayeneleri 2 yıl; enerji nakil ve dağıtım hatları 5 yıl.
+`;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const scanBox = document.getElementById('scanBox');
+const scanHint = document.getElementById('scanHint');
+const answerBox = document.getElementById('answerBox');
+
+const toggleScanBtn = document.getElementById('toggleScanBtn');
+const instantScanBtn = document.getElementById('instantScanBtn');
+const replayVoiceBtn = document.getElementById('replayVoiceBtn');
+const voiceToggleBtn = document.getElementById('voiceToggleBtn');
+
+const settingsModal = document.getElementById('settingsModal');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const intervalSelect = document.getElementById('intervalSelect');
+const rateSelect = document.getElementById('rateSelect');
+
+let isLiveScanning = false;
+let isProcessing = false;
+let scanTimer = null;
+let voiceEnabled = true;
+let lastSpokenText = "";
+let lastQuestionFingerprint = "";
+let previousFrameData = null;
+
+// Kayıtlı ayarları yükle
+apiKeyInput.value = localStorage.getItem('gemini_api_key') || '';
+if (localStorage.getItem('scan_interval')) intervalSelect.value = localStorage.getItem('scan_interval');
+if (localStorage.getItem('voice_rate')) rateSelect.value = localStorage.getItem('voice_rate');
+
+// Kamerayı sayfa açılır açılmaz başlat
+async function initCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        });
+        video.srcObject = stream;
+        setStatus('ready', 'Kamera Hazır');
+    } catch (err) {
+        setStatus('idle', 'Kamera İzni Gerekli');
+        answerBox.innerHTML = `<span style="color:#fca5a5;">Kamera açılamadı: ${err.message}. Lütfen tarayıcıdan kamera izni verin ve sayfayı HTTPS üzerinden açın.</span>`;
+    }
+}
+
+function setStatus(state, text) {
+    statusText.textContent = text;
+    statusDot.className = 'dot';
+    if (state === 'live') statusDot.classList.add('live');
+    if (state === 'busy') statusDot.classList.add('busy');
+}
+
+// Sesli okuma fonksiyonu
+function speakText(text) {
+    if (!voiceEnabled || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'tr-TR';
+    utterance.rate = parseFloat(rateSelect.value || '1.1');
+    window.speechSynthesis.speak(utterance);
+}
+
+// Kare değişimi algılama (Aynı sayfada dururken gereksiz API isteğini önler)
+function hasFrameChanged() {
+    if (!video.videoWidth) return false;
+    const w = 160, h = 90;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+    const current = ctx.getImageData(0, 0, w, h).data;
+
+    if (!previousFrameData) {
+        previousFrameData = new Uint8ClampedArray(current);
+        return true;
+    }
+
+    let diff = 0;
+    for (let i = 0; i < current.length; i += 16) {
+        diff += Math.abs(current[i] - previousFrameData[i]);
+    }
+    const avgDiff = diff / (current.length / 16);
+    previousFrameData = new Uint8ClampedArray(current);
+    return avgDiff > 6.5; // Kamera hareket ettiyse veya yeni soru geldiyse true
+}
+
+// Çerçeve içindeki görüntüyü yakala
+function captureCropBase64() {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return null;
+
+    // Ekran ortasındaki soru çerçevesine odaklan
+    const cropW = Math.floor(vw * 0.88);
+    const cropH = Math.floor(vh * 0.45);
+    const cropX = Math.floor((vw - cropW) / 2);
+    const cropY = Math.floor((vh - cropH) / 2);
+
+    canvas.width = cropW;
+    canvas.height = cropH;
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    return canvas.toDataURL('image/jpeg', 0.78).split(',')[1];
+}
+
+async function analyzeFrame(force = false) {
+    const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) {
+        settingsModal.classList.add('open');
+        stopLiveScan();
+        return;
+    }
+    if (isProcessing || !video.videoWidth) return;
+
+    if (!force && !hasFrameChanged()) {
+        scanHint.textContent = "Yeni soru bekleniyor (Kamerayı soruya tutun)";
+        return;
+    }
+
+    const base64Img = captureCropBase64();
+    if (!base64Img) return;
+
+    isProcessing = true;
+    setStatus('busy', 'Soru Taranıyor...');
+    scanBox.classList.add('scanning');
+    scanBox.classList.remove('found');
+    scanHint.textContent = "Görüntü analiz ediliyor...";
+
+    const prompt = `Sen bir TEDAŞ elektrik eğitim asistanısın. Ekrandaki kamera görüntüsüne bak.
+Eğer görüntüde okunabilir bir soru YOKSA (boş masa, bulanık görüntü, soru metni yok), SADECE "SORU_YOK" yaz ve başka hiçbir şey ekleme.
+Eğer görüntüde bir soru VARSA, SADECE aşağıdaki kaynak kitap bilgilerine dayanarak çöz ve cevabı kısa, net, sesli okumaya uygun Türkçe ile yaz.
+
+Format tam olarak şöyle olsun:
+SORU_OZETI: [Sorunun ilk 5 kelimesi]
+CEVAP: [Doğru şık veya net cevap - örn: "Cevap B şıkkı, 20 metre."]
+ACIKLAMA: [Sayfa numarasıyla birlikte tek cümlelik net gerekçe - örn: "Sayfa 261'e göre işletme ile koruma topraklaması arasında en az 20 metre mesafe olmalıdır."]
+
+${KNOWLEDGE_BASE}`;
+
+    try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: prompt },
+                        { inline_data: { mime_type: "image/jpeg", data: base64Img } }
+                    ]
+                }],
+                generationConfig: { temperature: 0.1 }
+            })
+        });
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message);
+
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+        if (rawText.includes("SORU_YOK")) {
+            scanBox.classList.remove('scanning', 'found');
+            scanHint.textContent = "Soru algılanmadı, çerçeveyi soruya yaklaştırın";
+        } else {
+            const ozetMatch = rawText.match(/SORU_OZETI:\s*(.*)/i);
+            const cevapMatch = rawText.match(/CEVAP:\s*(.*)/i);
+            const aciklamaMatch = rawText.match(/ACIKLAMA:\s*(.*)/i);
+
+            const fingerprint = (ozetMatch ? ozetMatch[1] : rawText.slice(0, 35)).toLowerCase().trim();
+            const cevap = cevapMatch ? cevapMatch[1].trim() : rawText;
+            const aciklama = aciklamaMatch ? aciklamaMatch[1].trim() : "";
+
+            scanBox.classList.remove('scanning');
+            scanBox.classList.add('found');
+            scanHint.textContent = "Soru çözüldü!";
+
+            answerBox.innerHTML = `
+                <div class="answer-badge">✅ ÇÖZÜM BULUNDU</div>
+                <div style="font-size:16px; font-weight:700; color:#fff; margin-bottom:4px;">${cevap}</div>
+                <div style="color:#cbd5e1; font-size:13.5px;">${aciklama}</div>
+            `;
+
+            // Aynı soruyu tekrar tekrar okumasını engelle (force değilse)
+            if (force || fingerprint !== lastQuestionFingerprint) {
+                lastQuestionFingerprint = fingerprint;
+                lastSpokenText = `${cevap} ${aciklama}`;
+                speakText(lastSpokenText);
+            }
+        }
+    } catch (err) {
+        scanBox.classList.remove('scanning');
+        answerBox.innerHTML = `<span style="color:#fca5a5;">Hata: ${err.message}</span>`;
+    } finally {
+        isProcessing = false;
+        setStatus(isLiveScanning ? 'live' : 'ready', isLiveScanning ? 'Canlı Tarama Aktif' : 'Kamera Hazır');
+    }
+}
+
+function startLiveScan() {
+    if (!localStorage.getItem('gemini_api_key')) {
+        settingsModal.classList.add('open');
+        return;
+    }
+    isLiveScanning = true;
+    previousFrameData = null;
+    toggleScanBtn.textContent = "⏹️ Canlı Taramayı Durdur";
+    toggleScanBtn.classList.add('stop');
+    scanBox.classList.add('active');
+    setStatus('live', 'Canlı Tarama Aktif');
+
+    // İlk taramayı hemen yap
+    analyzeFrame(true);
+
+    const ms = parseInt(intervalSelect.value || '5000', 10);
+    scanTimer = setInterval(() => analyzeFrame(false), ms);
+}
+
+function stopLiveScan() {
+    isLiveScanning = false;
+    clearInterval(scanTimer);
+    toggleScanBtn.textContent = "▶️ Canlı Taramayı Başlat";
+    toggleScanBtn.classList.remove('stop');
+    scanBox.classList.remove('active', 'scanning');
+    setStatus('ready', 'Kamera Hazır');
+    scanHint.textContent = "Tarama durduruldu";
+}
+
+toggleScanBtn.addEventListener('click', () => {
+    if (isLiveScanning) stopLiveScan();
+    else startLiveScan();
+});
+
+instantScanBtn.addEventListener('click', () => {
+    analyzeFrame(true);
+});
+
+replayVoiceBtn.addEventListener('click', () => {
+    if (lastSpokenText) speakText(lastSpokenText);
+});
+
+voiceToggleBtn.addEventListener('click', () => {
+    voiceEnabled = !voiceEnabled;
+    voiceToggleBtn.textContent = voiceEnabled ? "🔊 Ses Açık" : "🔇 Ses Kapalı";
+    if (!voiceEnabled && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
+});
+
+document.getElementById('settingsBtn').addEventListener('click', () => {
+    settingsModal.classList.add('open');
+});
+document.getElementById('closeSettingsBtn').addEventListener('click', () => {
+    settingsModal.classList.remove('open');
+});
+document.getElementById('saveSettingsBtn').addEventListener('click', () => {
+    const key = apiKeyInput.value.trim();
+    if (key) localStorage.setItem('gemini_api_key', key);
+    localStorage.setItem('scan_interval', intervalSelect.value);
+    localStorage.setItem('voice_rate', rateSelect.value);
+    settingsModal.classList.remove('open');
+    if (isLiveScanning) {
+        stopLiveScan();
+        startLiveScan();
+    }
+});
+
+initCamera();
+</script>
+</body>
+</html>
